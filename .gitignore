@@ -1,0 +1,10 @@
+#build outputs: always generated from source, never committed
+build/
+bin/
+*.o
+
+# editor/OS junk
+.vscode
+*.swp
+.DS_Store
+
