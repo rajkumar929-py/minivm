@@ -8,7 +8,7 @@ CFLAGS  = -std=c11 -Wall -Wextra -O2 -g -Isrc
 BUILD   = build
 BIN     = bin
 
-SRCS    = src/main.c
+SRCS    = src/main.c src/bytecode.c
 OBJS    = $(SRCS:src/%.c=$(BUILD)/%.o)
 
 all: $(BIN)/minivm
