@@ -106,3 +106,42 @@ int instr_length(const Chunk *c, int offset)
 {
     return 1 + 4 * op_info[c->code[offset]].noperands;
 }
+/* print one instruction; return the offset of the next one */
+int disassemble_instr(const Chunk *c, int offset, FILE *out)
+{
+    uint8_t op = c->code[offset];
+    const OpInfo *info = &op_info[op];
+    int line = c->lines[offset];
+    int prev_line = offset > 0 ? c->lines[offset - 1] : -1;
+
+    fprintf(out, "%04d ", offset);
+    if (line == prev_line && !(c->flags[offset] & BC_STMT)) fprintf(out, "   | ");
+    else fprintf(out, "%4d ", line);
+    fputc((c->flags[offset] & BC_STMT) ? '*' : ' ', out);
+
+    if (!info->name) {
+        fprintf(out, " <bad opcode 0x%02X>\n", op);
+        return offset + 1;
+    }
+    if (offset + instr_length(c, offset) > c->count) {
+        fprintf(out, " %s <truncated>\n", info->name);
+        return c->count;
+    }
+    if (info->noperands == 0)
+        fprintf(out, " %s\n", info->name);
+    else if (info->noperands == 1)
+        fprintf(out, " %-9s %d\n", info->name, chunk_read_i32(c, offset + 1));
+    else
+        fprintf(out, " %-9s %d, %d\n", info->name,
+                chunk_read_i32(c, offset + 1), chunk_read_i32(c, offset + 5));
+    return offset + instr_length(c, offset);
+}
+
+void disassemble_chunk(const Chunk *c, const char *name, FILE *out)
+{
+    fprintf(out, "== %s (%d bytes) ==\n", name, c->count);
+    fprintf(out, "addr line   instr     operands\n");
+    for (int off = 0; off < c->count;)
+        off = disassemble_instr(c, off, out);
+}
+
