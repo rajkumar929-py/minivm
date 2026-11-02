@@ -79,6 +79,34 @@ static void build_loop(Chunk *c)
 
     chunk_patch_i32(c, exit_operand, loop_exit);   /* back-patch */
 }
+/* print 10 / (5 - 5);  -> runtime error */
+static void build_divzero(Chunk *c)
+{
+    chunk_mark_stmt(c, chunk_emit_op(c, OP_PUSH, 1));
+    chunk_emit_i32(c, 10, 1);
+    chunk_emit_op(c, OP_PUSH, 1); chunk_emit_i32(c, 5, 1);
+    chunk_emit_op(c, OP_PUSH, 1); chunk_emit_i32(c, 5, 1);
+    chunk_emit_op(c, OP_SUB, 1);
+    chunk_emit_op(c, OP_DIV, 1);
+    chunk_emit_op(c, OP_PRINT, 1);
+    chunk_emit_op(c, OP_HALT, 1);
+}
+
+/* nil + 1  -> type error */
+static void build_typeerr(Chunk *c)
+{
+    chunk_mark_stmt(c, chunk_emit_op(c, OP_PUSH_NIL, 1));
+    chunk_emit_op(c, OP_PUSH, 1); chunk_emit_i32(c, 1, 1);
+    chunk_emit_op(c, OP_ADD, 1);
+    chunk_emit_op(c, OP_HALT, 1);
+}
+
+/* ADD on an empty stack -> underflow */
+static void build_underflow(Chunk *c)
+{
+    chunk_mark_stmt(c, chunk_emit_op(c, OP_ADD, 1));
+    chunk_emit_op(c, OP_HALT, 1);
+}
 
 
 int main(int argc, char **argv)
@@ -90,10 +118,14 @@ int main(int argc, char **argv)
     chunk_init(&c);
     if      (strcmp(which, "demo") == 0)      build_demo(&c);
     else if (strcmp(which, "loop") == 0)      build_loop(&c);
+    else if (strcmp(which, "divzero") == 0)   build_divzero(&c);
+    else if (strcmp(which, "typeerr") == 0)   build_typeerr(&c);
+    else if (strcmp(which, "underflow") == 0) build_underflow(&c);
     else {
-        fprintf(stderr, "usage: %s [demo|loop] [trace]\n", argv[0]);
+        fprintf(stderr, "usage: %s [demo|loop|divzero|typeerr|underflow] [trace]\n", argv[0]);
         return 2;
     }
+
 
     if (trace) disassemble_chunk(&c, which, stdout);
 
