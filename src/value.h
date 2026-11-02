@@ -11,6 +11,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdio.h>
 
 typedef struct Obj Obj;     /* defined in Part 8; a pointer is enough for now */
 
@@ -51,5 +52,6 @@ static inline bool values_equal(Value a, Value b)
     }
     return false;
 }
+void value_print(FILE *out, Value v);
 
 #endif
