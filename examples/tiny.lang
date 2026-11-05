@@ -1,0 +1,5 @@
+// tiny.lang - every kind of token in a few lines
+var x = 10;
+if (x >= 5) {
+    print x * 2;   /* a block comment */
+}
