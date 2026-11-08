@@ -8,7 +8,8 @@
  *              -> term        + -
  *              -> factor      * / %
  *              -> unary       -x +x
- *              -> primary     42  nil  x  (expr)   (highest: done first)
+ *              -> postfix     p.left  p.right
+ *              -> primary     42  nil  x  f(..)  pair(..)  (expr)   (highest)
  *
  * Each binary level is LEFT-recursive (term: term '+' factor), which makes
  * the operators left-associative: 10 - 3 - 2 means (10 - 3) - 2.
@@ -27,6 +28,9 @@ int yylex(void);
 void yyerror(const char *msg);
 
 static Node *g_root;    /* the finished tree, set by the 'program' rule */
+
+static int field_index(const char *name, int line);
+
 %}
 
 %locations
@@ -37,6 +41,8 @@ static Node *g_root;    /* the finished tree, set by the 'program' rule */
     char     *str;
     Node     *node;
     NodeList  list;
+    struct { char **names; int count; } params;   /* function parameters */
+
 }
 
 %token VAR "var" IF "if" ELSE "else" WHILE "while" FOR "for"
@@ -50,10 +56,12 @@ static Node *g_root;    /* the finished tree, set by the 'program' rule */
 %precedence LOWER_THAN_ELSE
 %precedence ELSE
 
-%type <node> statement var_decl simple_assign block
+%type <node> item statement var_decl simple_assign block func_decl
 %type <node> if_stmt while_stmt for_stmt for_init opt_simple_assign opt_expr
-%type <node> expression equality comparison term factor unary primary
-%type <list> items statement_list
+%type <node> expression equality comparison term factor unary postfix primary call
+%type <list> items statement_list args arg_list
+%type <params> param_list param_list_opt
+
 
 %start program
 
@@ -65,17 +73,62 @@ program
 
 items
     : %empty                        { memset(&$$, 0, sizeof $$); }
-    | items statement               { $$ = $1; ast_list_push(&$$, $2); }
+        | items item                    { $$ = $1; ast_list_push(&$$, $2); }
     ;
+
+item
+    : statement                     { $$ = $1; }
+    | func_decl                     { $$ = $1; }
+    ;
+
+func_decl
+    : FUNC IDENTIFIER '(' param_list_opt ')' block
+        {
+            $$ = ast_new(N_FUNC_DECL, @1.first_line);
+            $$->name = $2;
+            $$->params = $4.names;
+            $$->nparams = $4.count;
+            $$->a = $6;
+        }
+    ;
+
+param_list_opt
+    : %empty                        { $$.names = NULL; $$.count = 0; }
+    | param_list                    { $$ = $1; }
+    ;
+
+param_list
+    : IDENTIFIER
+        { $$.names = malloc(sizeof(char *)); $$.names[0] = $1; $$.count = 1; }
+    | param_list ',' IDENTIFIER
+        {
+            $$ = $1;
+            $$.names = realloc($$.names, ($$.count + 1) * sizeof(char *));
+            $$.names[$$.count++] = $3;
+        }
+    ;
+
 
 statement
     : var_decl                      { $$ = $1; }
     | simple_assign ';'             { $$ = $1; }
+    | postfix '.' IDENTIFIER '=' expression ';'
+        {
+            $$ = ast_new(N_FIELD_ASSIGN, @1.first_line);
+            $$->a = $1;
+            $$->b = $5;
+            $$->field = field_index($3, @3.first_line);
+            free($3);
+        }
+
     | if_stmt                       { $$ = $1; }
     | while_stmt                    { $$ = $1; }
     | for_stmt                      { $$ = $1; }
     | block                         { $$ = $1; }
     | PRINT expression ';'          { $$ = ast_new(N_PRINT, @1.first_line); $$->a = $2; }
+    | call ';'                      { $$ = ast_new(N_EXPR_STMT, @1.first_line); $$->a = $1; }
+    | RETURN ';'                    { $$ = ast_new(N_RETURN, @1.first_line); }
+    | RETURN expression ';'         { $$ = ast_new(N_RETURN, @1.first_line); $$->a = $2; }
     | BREAK ';'                     { $$ = ast_new(N_BREAK, @1.first_line); }
     | CONTINUE ';'                  { $$ = ast_new(N_CONTINUE, @1.first_line); }
 
@@ -173,17 +226,58 @@ factor
 unary
     : '-' unary                     { $$ = ast_unary(OP_NEG_, $2, @1.first_line); }
     | '+' unary                     { $$ = ast_unary(OP_POS_, $2, @1.first_line); }
-    | primary                       { $$ = $1; }
+    | postfix                       { $$ = $1; }
+    ;
+
+postfix
+    : primary                       { $$ = $1; }
+    | postfix '.' IDENTIFIER
+        {
+            $$ = ast_new(N_FIELD, @2.first_line);
+            $$->a = $1;
+            $$->field = field_index($3, @3.first_line);
+            free($3);
+        }
     ;
 
 primary
     : INTEGER                       { $$ = ast_int($1, @1.first_line); }
     | NIL                           { $$ = ast_new(N_NIL, @1.first_line); }
     | IDENTIFIER                    { $$ = ast_ident($1, @1.first_line); }
+    | call                          { $$ = $1; }
+    | PAIR '(' expression ',' expression ')'
+        { $$ = ast_new(N_PAIR, @1.first_line); $$->a = $3; $$->b = $5; }
+
     | '(' expression ')'            { $$ = $2; }
     ;
 
+call
+    : IDENTIFIER '(' args ')'
+        { $$ = ast_new(N_CALL, @1.first_line); $$->name = $1; $$->list = $3; }
+    ;
+
+args
+    : %empty                        { memset(&$$, 0, sizeof $$); }
+    | arg_list                      { $$ = $1; }
+    ;
+
+arg_list
+    : expression                    { memset(&$$, 0, sizeof $$); ast_list_push(&$$, $1); }
+    | arg_list ',' expression       { $$ = $1; ast_list_push(&$$, $3); }
+    ;
+
+
 %%
+
+
+/* p.left -> 0, p.right -> 1. Pairs have no other fields. */
+static int field_index(const char *name, int line)
+{
+    if (strcmp(name, "left") == 0)  return 0;
+    if (strcmp(name, "right") == 0) return 1;
+    fe_error(line, "unknown field '%s' (pairs only have 'left' and 'right')", name);
+    return 0;
+}
 
 /* Bison calls this on a syntax error. yylloc is the location of the bad token. */
 void yyerror(const char *msg)

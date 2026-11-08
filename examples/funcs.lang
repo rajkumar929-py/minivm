@@ -1,0 +1,12 @@
+// funcs.lang - functions, calls, return, pairs, fields
+func add(a, b) {
+    return a + b;
+}
+func hello() {
+    print 1;
+    return;
+}
+var p = pair(add(1, 2), nil);
+p.right = pair(3, nil);
+hello();
+print p.right.left;
