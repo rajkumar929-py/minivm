@@ -62,18 +62,27 @@ static int field_index(const char *name, int line);
 %type <list> items statement_list args arg_list
 %type <params> param_list param_list_opt
 
+/* On a syntax error Bison throws away half-built values. These tell it how to
+   free each kind, so a bad program doesn't leak memory. */
+%destructor { free($$); } <str>
+%destructor { ast_free($$); } <node>
+%destructor { for (int i = 0; i < $$.count; i++) ast_free($$.items[i]); free($$.items); } <list>
+%destructor { for (int i = 0; i < $$.count; i++) free($$.names[i]); free($$.names); } <params>
+
 
 %start program
 
 %%
 
 program
+    /* untyped on purpose: Bison runs the %destructor on a typed start symbol
+       after a successful parse, which would free the finished tree. */
     : items                         { g_root = ast_new(N_PROGRAM, 1); g_root->list = $1; }
     ;
 
 items
     : %empty                        { memset(&$$, 0, sizeof $$); }
-        | items item                    { $$ = $1; ast_list_push(&$$, $2); }
+    | items item                    { $$ = $1; if ($2) ast_list_push(&$$, $2); }
     ;
 
 item
@@ -131,6 +140,7 @@ statement
     | RETURN expression ';'         { $$ = ast_new(N_RETURN, @1.first_line); $$->a = $2; }
     | BREAK ';'                     { $$ = ast_new(N_BREAK, @1.first_line); }
     | CONTINUE ';'                  { $$ = ast_new(N_CONTINUE, @1.first_line); }
+    | error ';'                     { $$ = NULL; yyerrok; }   /* skip to the next ';' */
 
     ;
 
@@ -151,7 +161,7 @@ block
 
 statement_list
     : %empty                        { memset(&$$, 0, sizeof $$); }
-    | statement_list statement      { $$ = $1; ast_list_push(&$$, $2); }
+    | statement_list statement      { $$ = $1; if ($2) ast_list_push(&$$, $2); }
     ;
 
 if_stmt

@@ -1,0 +1,6 @@
+var a = ;
+var b = 2
+print b;
+var c = 3;
+print c +;
+print c.middle;
