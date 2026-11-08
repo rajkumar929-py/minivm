@@ -1,0 +1,5 @@
+var r = 0;
+if (1)
+  if (0) r = 1;
+  else r = 2;     // binds to the inner if
+print r;

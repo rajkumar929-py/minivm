@@ -46,9 +46,14 @@ static Node *g_root;    /* the finished tree, set by the 'program' rule */
 %token <ival> INTEGER "integer"
 %token <str>  IDENTIFIER "identifier"
 
-%type <node> statement var_decl simple_assign
+/* dangling else: an 'else' binds to the nearest 'if' (see if_stmt) */
+%precedence LOWER_THAN_ELSE
+%precedence ELSE
+
+%type <node> statement var_decl simple_assign block
+%type <node> if_stmt while_stmt for_stmt for_init opt_simple_assign opt_expr
 %type <node> expression equality comparison term factor unary primary
-%type <list> items
+%type <list> items statement_list
 
 %start program
 
@@ -66,7 +71,14 @@ items
 statement
     : var_decl                      { $$ = $1; }
     | simple_assign ';'             { $$ = $1; }
+    | if_stmt                       { $$ = $1; }
+    | while_stmt                    { $$ = $1; }
+    | for_stmt                      { $$ = $1; }
+    | block                         { $$ = $1; }
     | PRINT expression ';'          { $$ = ast_new(N_PRINT, @1.first_line); $$->a = $2; }
+    | BREAK ';'                     { $$ = ast_new(N_BREAK, @1.first_line); }
+    | CONTINUE ';'                  { $$ = ast_new(N_CONTINUE, @1.first_line); }
+
     ;
 
 var_decl
@@ -80,6 +92,52 @@ simple_assign
     : IDENTIFIER '=' expression
         { $$ = ast_new(N_ASSIGN, @1.first_line); $$->name = $1; $$->a = $3; }
     ;
+block
+    : '{' statement_list '}'        { $$ = ast_new(N_BLOCK, @1.first_line); $$->list = $2; }
+    ;
+
+statement_list
+    : %empty                        { memset(&$$, 0, sizeof $$); }
+    | statement_list statement      { $$ = $1; ast_list_push(&$$, $2); }
+    ;
+
+if_stmt
+    : IF '(' expression ')' statement %prec LOWER_THAN_ELSE
+        { $$ = ast_new(N_IF, @1.first_line); $$->a = $3; $$->b = $5; }
+    | IF '(' expression ')' statement ELSE statement
+        { $$ = ast_new(N_IF, @1.first_line); $$->a = $3; $$->b = $5; $$->c = $7; }
+    ;
+
+while_stmt
+    : WHILE '(' expression ')' statement
+        { $$ = ast_new(N_WHILE, @1.first_line); $$->a = $3; $$->b = $5; }
+    ;
+
+for_stmt
+    : FOR '(' for_init ';' opt_expr ';' opt_simple_assign ')' statement
+        {
+            $$ = ast_new(N_FOR, @1.first_line);
+            $$->a = $3; $$->b = $5; $$->c = $7; $$->d = $9;
+        }
+    ;
+
+for_init
+    : %empty                        { $$ = NULL; }
+    | VAR IDENTIFIER '=' expression
+        { $$ = ast_new(N_VAR_DECL, @1.first_line); $$->name = $2; $$->a = $4; }
+    | simple_assign                 { $$ = $1; }
+    ;
+
+opt_simple_assign
+    : %empty                        { $$ = NULL; }
+    | simple_assign                 { $$ = $1; }
+    ;
+
+opt_expr
+    : %empty                        { $$ = NULL; }
+    | expression                    { $$ = $1; }
+    ;
+
 
 expression
     : equality                      { $$ = $1; }

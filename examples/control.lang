@@ -1,0 +1,8 @@
+// control.lang - blocks, if/else, while, for, break, continue
+var i = 0;
+while (i < 3) {
+    if (i == 1) print i; else { i = i + 1; continue; }
+    i = i + 1;
+}
+for (var k = 0; k < 2; k = k + 1) break;
+for (;;) { }
