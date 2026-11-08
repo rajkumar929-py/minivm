@@ -12,10 +12,15 @@
 #include <limits.h>
 #include <errno.h>
 #include "frontend.h"
-#include "tokens.h"
+#include "parser.tab.h"
 
 static int comment_start_line;
+
+/* runs before every action: record the line of the token for the parser (@1) */
+#define YY_USER_ACTION  yylloc.first_line = yylloc.last_line = yylineno;
 %}
+
+
 
 %option noyywrap nounput noinput yylineno
 %x COMMENT

@@ -4,9 +4,9 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include "frontend.h"
-#include "tokens.h"
+#include "parser.tab.h"
 
-YYSTYPE yylval;     /* the current token's value (Bison defines this in Part 4) */
+
 
 static const char *g_filename = "<input>";
 static int g_errors;

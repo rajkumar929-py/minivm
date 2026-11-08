@@ -3,15 +3,16 @@
 #   make clean   delete all build outputs
 
 CC      = gcc
-CFLAGS  = -std=c11 -Wall -Wextra -O2 -g -D_POSIX_C_SOURCE=200809L -Isrc
+CFLAGS  = -std=c11 -Wall -Wextra -O2 -g -D_POSIX_C_SOURCE=200809L -Isrc -Ibuild
 FLEX    = flex
+BISON   = bison
 
 BUILD   = build
 BIN     = bin
 
 # code shared by every program
-CORE_SRCS = src/bytecode.c src/value.c src/vm.c src/frontend.c
-CORE_OBJS = $(CORE_SRCS:src/%.c=$(BUILD)/%.o) $(BUILD)/lex.yy.o
+CORE_SRCS = src/bytecode.c src/value.c src/vm.c src/frontend.c src/ast.c
+CORE_OBJS = $(CORE_SRCS:src/%.c=$(BUILD)/%.o) $(BUILD)/parser.tab.o $(BUILD)/lex.yy.o
 
 all: $(BIN)/minivm $(BIN)/langc
 
@@ -22,16 +23,23 @@ $(BIN)/minivm: $(CORE_OBJS) $(BUILD)/main.o | $(BIN)
 $(BIN)/langc: $(CORE_OBJS) $(BUILD)/langc.o | $(BIN)
 	$(CC) $(CFLAGS) -o $@ $^
 
-# flex: lexer.l -> lex.yy.c (generated C code, lives in build/)
-$(BUILD)/lex.yy.c: src/lexer.l src/tokens.h src/frontend.h | $(BUILD)
+# bison: parser.y -> parser.tab.c (the parser) + parser.tab.h (token numbers)
+$(BUILD)/parser.tab.c $(BUILD)/parser.tab.h: src/parser.y | $(BUILD)
+	$(BISON) -d -Wall -o $(BUILD)/parser.tab.c $<
+
+# flex: lexer.l -> lex.yy.c (needs the token numbers from parser.tab.h)
+$(BUILD)/lex.yy.c: src/lexer.l $(BUILD)/parser.tab.h src/frontend.h | $(BUILD)
 	$(FLEX) -o $@ $<
 
 # generated code is not warning-clean with -Wextra; relax for it only
+$(BUILD)/parser.tab.o: $(BUILD)/parser.tab.c
+	$(CC) $(CFLAGS) -Wno-unused-function -c -o $@ $<
+
 $(BUILD)/lex.yy.o: $(BUILD)/lex.yy.c
 	$(CC) $(CFLAGS) -Wno-unused-function -Wno-sign-compare -c -o $@ $<
 
-# compile: each src/X.c -> build/X.o
-$(BUILD)/%.o: src/%.c | $(BUILD)
+# compile: each src/X.c -> build/X.o (after parser.tab.h exists)
+$(BUILD)/%.o: src/%.c $(BUILD)/parser.tab.h | $(BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BUILD) $(BIN):

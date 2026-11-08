@@ -1,0 +1,5 @@
+// expr.lang - precedence and associativity
+var x = 2 + 3 * 4;
+var y = 10 - 3 - 2;
+x = -(x + 1) * 2;
+print x == y + 1 < 5;
