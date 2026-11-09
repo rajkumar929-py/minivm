@@ -34,6 +34,9 @@ Node *ast_new(NodeKind kind, int line)
     Node *n = xcalloc(1, sizeof *n);    /* every field starts as 0 / NULL */
     n->kind = kind;
     n->line = line;
+    n->slot = -1;                       /* -1 = not filled in yet */
+    n->func_index = -1;
+    n->alloc_site = -1;
     return n;
 }
 

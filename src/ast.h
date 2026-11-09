@@ -43,6 +43,9 @@ typedef enum {
     OP_NEG_, OP_POS_
 } AstOp;
 
+/* Where a variable lives. Filled in by the semantic pass. */
+typedef enum { SYM_GLOBAL, SYM_LOCAL } SymKind;
+
 typedef struct Node Node;
 
 /* A growable array of child nodes. All zero = empty list. */
@@ -65,6 +68,14 @@ struct Node {
     int ival;               /* N_INT value                            */
     AstOp op;               /* N_BINARY / N_UNARY                     */
     int field;              /* N_FIELD / N_FIELD_ASSIGN: 0 left, 1 right */
+
+    /* annotations, filled in by the semantic pass (Part 5) */
+    SymKind sym_kind;       /* N_IDENT, N_ASSIGN, N_VAR_DECL              */
+    int slot;               /* global index or frame-local index, -1 = unset */
+    int func_index;         /* N_CALL target / N_FUNC_DECL's own index, -1 = unset */
+    int nlocals;            /* N_FUNC_DECL: local slots the function needs */
+    int alloc_site;         /* N_PAIR: which pair() this is, -1 = unset   */
+
 };
 
 Node *ast_new(NodeKind kind, int line);
