@@ -124,6 +124,15 @@ static void pad(FILE *out, int indent)
 
 static const char *field_name(int f) { return f ? "right" : "left"; }
 
+/* Ends a line, showing the variable's slot if the semantic pass has set one. */
+static void end_with_slot(FILE *out, const Node *n)
+{
+    if (n->slot >= 0)
+        fprintf(out, " [%s %d]", n->sym_kind == SYM_LOCAL ? "local" : "global", n->slot);
+    fputc('\n', out);
+}
+
+
 void ast_print(FILE *out, const Node *n, int indent)
 {
     if (!n) { pad(out, indent); fputs("(null)\n", out); return; }
@@ -138,11 +147,11 @@ void ast_print(FILE *out, const Node *n, int indent)
         for (int i = 0; i < n->list.count; i++) ast_print(out, n->list.items[i], indent + 1);
         break;
     case N_VAR_DECL:
-        fprintf(out, "VarDecl %s (line %d)\n", n->name, n->line);
+        fprintf(out, "VarDecl %s (line %d)", n->name, n->line); end_with_slot(out, n);
         if (n->a) ast_print(out, n->a, indent + 1);
         break;
     case N_ASSIGN:
-        fprintf(out, "Assign %s (line %d)\n", n->name, n->line);
+        fprintf(out, "Assign %s (line %d)", n->name, n->line); end_with_slot(out, n);
         ast_print(out, n->a, indent + 1);
         break;
     case N_FIELD_ASSIGN:
@@ -185,7 +194,9 @@ void ast_print(FILE *out, const Node *n, int indent)
     case N_FUNC_DECL:
         fprintf(out, "Func %s(", n->name);
         for (int i = 0; i < n->nparams; i++) fprintf(out, "%s%s", i ? ", " : "", n->params[i]);
-        fprintf(out, ") (line %d)\n", n->line);
+        fprintf(out, ") (line %d)", n->line);
+        if (n->func_index >= 0) fprintf(out, " [func %d, %d locals]", n->func_index, n->nlocals);
+        fputc('\n', out);
         ast_print(out, n->a, indent + 1);
         break;
     case N_RETURN:
@@ -194,7 +205,7 @@ void ast_print(FILE *out, const Node *n, int indent)
         break;
     case N_INT:   fprintf(out, "Int %d\n", n->ival); break;
     case N_NIL:   fprintf(out, "Nil\n"); break;
-    case N_IDENT: fprintf(out, "Ident %s\n", n->name); break;
+    case N_IDENT: fprintf(out, "Ident %s", n->name); end_with_slot(out, n); break;
     case N_BINARY:
         fprintf(out, "Binary %s\n", ast_op_str(n->op));
         ast_print(out, n->a, indent + 1);
@@ -205,11 +216,15 @@ void ast_print(FILE *out, const Node *n, int indent)
         ast_print(out, n->a, indent + 1);
         break;
     case N_CALL:
-        fprintf(out, "Call %s\n", n->name);
+        fprintf(out, "Call %s", n->name);
+        if (n->func_index >= 0) fprintf(out, " [func %d]", n->func_index);
+        fputc('\n', out);
         for (int i = 0; i < n->list.count; i++) ast_print(out, n->list.items[i], indent + 1);
         break;
     case N_PAIR:
-        fprintf(out, "Pair (alloc site, line %d)\n", n->line);
+        fprintf(out, "Pair (alloc site, line %d)", n->line);
+        if (n->alloc_site >= 0) fprintf(out, " [site %d]", n->alloc_site);
+        fputc('\n', out);
         ast_print(out, n->a, indent + 1);
         ast_print(out, n->b, indent + 1);
         break;

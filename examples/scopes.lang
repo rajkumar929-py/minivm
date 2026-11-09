@@ -1,0 +1,12 @@
+// scopes.lang - shadowing, block scopes and slots
+var x = 1;
+{
+    var x = 2;
+    var y = x + 1;
+    print y;
+}
+for (var i = 0; i < 2; i = i + 1) {
+    var x = i;
+    print x;
+}
+print x;
