@@ -1,0 +1,6 @@
+func f(a, a) { return a; }
+func g() { }
+func g() { }
+print f(1);
+print h(2);
+return 5;

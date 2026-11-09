@@ -59,6 +59,24 @@ static void check_expr(Sema *s, Node *n)
     case N_FIELD:
         check_expr(s, n->a);
         break;
+    case N_PAIR:
+        check_expr(s, n->a);
+        check_expr(s, n->b);
+        n->alloc_site = s->nalloc_sites++;
+        break;
+    case N_CALL: {
+        int fi = symtab_find_func(&s->st, n->name);
+        if (fi < 0) {
+            sema_error(s, n->line, "call to undefined function '%s'", n->name);
+        } else if (s->st.funcs[fi].arity != n->list.count) {
+            sema_error(s, n->line, "function '%s' expects %d argument(s), got %d",
+                       n->name, s->st.funcs[fi].arity, n->list.count);
+        }
+        n->func_index = fi;
+        for (int i = 0; i < n->list.count; i++) check_expr(s, n->list.items[i]);
+        break;
+    }
+
     default:
         sema_error(s, n->line, "internal: unexpected node in expression");
     }
@@ -142,6 +160,34 @@ static void check_stmt(Sema *s, Node *n)
             sema_error(s, n->line, "'%s' outside of a loop",
                        n->kind == N_BREAK ? "break" : "continue");
         break;
+    case N_EXPR_STMT:
+        check_expr(s, n->a);
+        break;
+    case N_RETURN:
+        if (!s->st.in_function) sema_error(s, n->line, "'return' outside of a function");
+        check_expr(s, n->a);
+        break;
+    case N_FUNC_DECL: {
+        /* New scope whose parent is the global scope.
+           Parameters take local slots 0..nparams-1. */
+        int saved_loop = s->loop_depth;
+        s->loop_depth = 0;
+        s->st.in_function = 1;
+        s->st.next_local = 0;
+        symtab_push_scope(&s->st);
+        for (int i = 0; i < n->nparams; i++)
+            if (!symtab_declare(&s->st, n->params[i], n->line))
+                sema_error(s, n->line, "duplicate parameter '%s' in function '%s'",
+                           n->params[i], n->name);
+        /* the body shares the parameter scope, like C */
+        for (int i = 0; i < n->a->list.count; i++) check_stmt(s, n->a->list.items[i]);
+        symtab_pop_scope(&s->st);
+        n->nlocals = s->st.next_local;
+        s->st.in_function = 0;
+        s->loop_depth = saved_loop;
+        break;
+    }
+
     default:
         sema_error(s, n->line, "internal: unexpected node in statement");
     }
@@ -153,6 +199,16 @@ SemaResult semantic_analyze(Node *program, const char *filename)
     memset(&s, 0, sizeof s);
     s.filename = filename ? filename : "<input>";
     symtab_init(&s.st);
+
+    /* pass 1: function signatures */
+    for (int i = 0; i < program->list.count; i++) {
+        Node *n = program->list.items[i];
+        if (n->kind != N_FUNC_DECL) continue;
+        int idx = symtab_add_func(&s.st, n->name, n->nparams, n->line);
+        if (idx < 0) sema_error(&s, n->line, "redefinition of function '%s'", n->name);
+        n->func_index = idx;
+    }
+
 
     /* pass 2: bodies and top-level statements, in order */
     for (int i = 0; i < program->list.count; i++)

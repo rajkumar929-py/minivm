@@ -1,0 +1,14 @@
+// resolve.lang - forward calls, recursion, locals, pairs
+var total = 0;
+print twice(4);
+func twice(n) {
+    var r = n + n;
+    total = total + r;
+    return r;
+}
+func fact(n) {
+    if (n < 2) return 1;
+    return n * fact(n - 1);
+}
+var p = pair(fact(3), nil);
+print p.left;
