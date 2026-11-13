@@ -6,7 +6,7 @@ CC      = gcc
 CFLAGS  = -std=c11 -Wall -Wextra -O2 -g -D_POSIX_C_SOURCE=200809L -Isrc -Ibuild
 FLEX    = flex
 BISON   = bison
-
+DEPFLAGS = -MMD -MP
 BUILD   = build
 BIN     = bin
 
@@ -33,17 +33,19 @@ $(BUILD)/lex.yy.c: src/lexer.l $(BUILD)/parser.tab.h src/frontend.h | $(BUILD)
 
 # generated code is not warning-clean with -Wextra; relax for it only
 $(BUILD)/parser.tab.o: $(BUILD)/parser.tab.c
-	$(CC) $(CFLAGS) -Wno-unused-function -c -o $@ $<
+	$(CC) $(CFLAGS) $(DEPFLAGS) -Wno-unused-function -c -o $@ $<
 
 $(BUILD)/lex.yy.o: $(BUILD)/lex.yy.c
-	$(CC) $(CFLAGS) -Wno-unused-function -Wno-sign-compare -c -o $@ $<
+	$(CC) $(CFLAGS) $(DEPFLAGS) -Wno-unused-function -Wno-sign-compare -c -o $@ $<
 
 # compile: each src/X.c -> build/X.o (after parser.tab.h exists)
 $(BUILD)/%.o: src/%.c $(BUILD)/parser.tab.h | $(BUILD)
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(DEPFLAGS) -c -o $@ $<
 
 $(BUILD) $(BIN):
 	mkdir -p $@
+# use those lists, so editing a header rebuilds every .o that includes it
+-include $(wildcard $(BUILD)/*.d)
 
 clean:
 	rm -rf $(BUILD) $(BIN)

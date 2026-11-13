@@ -4,6 +4,7 @@
  * Machine state:
  *   pc        program counter (byte offset into chunk->code)
  *   stack/sp  operand stack; sp = number of values on it
+ *   frames    call stack: one CallFrame per function call that is running
  *   globals   global variables, one Value per slot
  *   state     READY -> RUNNING -> HALTED | ERROR
  */
@@ -13,7 +14,8 @@
 #include "bytecode.h"
 #include "value.h"
 
-#define VM_STACK_MAX 4096
+#define VM_STACK_MAX  4096
+#define VM_FRAMES_MAX 512       /* deepest recursion allowed */
 
 typedef enum {
     VM_READY,       /* loaded, not yet started  */
@@ -21,6 +23,12 @@ typedef enum {
     VM_HALTED,      /* executed HALT            */
     VM_ERROR        /* runtime error            */
 } VMState;
+/* One function call that is running. */
+typedef struct {
+    int ret_addr;               /* where RET continues: just after the CALL */
+    int base;                   /* stack index of local 0 (the frame pointer) */
+} CallFrame;
+
 
 typedef struct {
     Chunk *chunk;
@@ -28,6 +36,9 @@ typedef struct {
 
     Value stack[VM_STACK_MAX];
     int sp;                     /* number of values on the stack */
+
+    CallFrame frames[VM_FRAMES_MAX];
+    int nframes;                /* 0 = running the top-level code */
 
     Value *globals;
     int nglobals;

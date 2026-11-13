@@ -91,6 +91,37 @@ static void build_divzero(Chunk *c)
     chunk_emit_op(c, OP_PRINT, 1);
     chunk_emit_op(c, OP_HALT, 1);
 }
+/*
+ *   1: func add(a, b) { return a + b; }
+ *   2: print add(2, 3);
+ *
+ * Layout: top-level code, HALT, then the function body.
+ */
+static void build_call(Chunk *c)
+{
+    /* line 2: push the arguments, then CALL */
+    chunk_mark_stmt(c, chunk_emit_op(c, OP_PUSH, 2));
+    chunk_emit_i32(c, 2, 2);
+    chunk_emit_op(c, OP_PUSH, 2);  chunk_emit_i32(c, 3, 2);
+    chunk_emit_op(c, OP_CALL, 2);
+    int addr_operand = c->count;          /* where CALL's address will go */
+    chunk_emit_i32(c, -1, 2);             /* placeholder: add isn't written yet */
+    chunk_emit_i32(c, 2, 2);              /* argc = 2 */
+    chunk_emit_op(c, OP_PRINT, 2);
+    chunk_emit_op(c, OP_HALT, 2);
+
+    /* line 1: func add(a, b). a is local 0, b is local 1 */
+    int add = chunk_emit_op(c, OP_ENTER, 1);
+    chunk_emit_i32(c, 0, 1);              /* no locals besides the parameters */
+    chunk_mark_stmt(c, chunk_emit_op(c, OP_LOADL, 1));
+    chunk_emit_i32(c, 0, 1);
+    chunk_emit_op(c, OP_LOADL, 1); chunk_emit_i32(c, 1, 1);
+    chunk_emit_op(c, OP_ADD, 1);
+    chunk_emit_op(c, OP_RET, 1);
+
+    chunk_patch_i32(c, addr_operand, add);  /* back-patch: now add's address is known */
+}
+
 
 /* nil + 1  -> type error */
 static void build_typeerr(Chunk *c)
@@ -118,6 +149,7 @@ int main(int argc, char **argv)
     chunk_init(&c);
     if      (strcmp(which, "demo") == 0)      build_demo(&c);
     else if (strcmp(which, "loop") == 0)      build_loop(&c);
+    else if (strcmp(which, "call") == 0)      build_call(&c);
     else if (strcmp(which, "divzero") == 0)   build_divzero(&c);
     else if (strcmp(which, "typeerr") == 0)   build_typeerr(&c);
     else if (strcmp(which, "underflow") == 0) build_underflow(&c);

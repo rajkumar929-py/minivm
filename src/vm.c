@@ -85,6 +85,7 @@ static int execute_one(VM *vm)
     int len = 1 + 4 * op_info[op].noperands;
     if (ip + len > c->count) { runtime_error(vm, ip, "truncated instruction"); return 0; }
     int32_t a1 = op_info[op].noperands >= 1 ? chunk_read_i32(c, ip + 1) : 0;
+    int32_t a2 = op_info[op].noperands >= 2 ? chunk_read_i32(c, ip + 5) : 0;
 
     /* ---- safety checks from the op_info table ---- */
     if (op_info[op].pops > 0 && vm->sp < op_info[op].pops) {
@@ -167,6 +168,45 @@ static int execute_one(VM *vm)
         else vm->globals[a1] = POP();
         break;
 
+    case OP_LOADL:
+    case OP_STOREL: {
+        if (vm->nframes == 0) { runtime_error(vm, ip, "%s outside a function", op_info[op].name); return 0; }
+        int slot = vm->frames[vm->nframes - 1].base + a1;     /* frame pointer + index */
+        int limit = (op == OP_STOREL) ? vm->sp - 1 : vm->sp;  /* STOREL's value is on top */
+        if (a1 < 0 || slot >= limit) { runtime_error(vm, ip, "bad local slot %d", a1); return 0; }
+        if (op == OP_LOADL) PUSH(vm->stack[slot]);
+        else vm->stack[slot] = POP();
+        break;
+    }
+
+    case OP_CALL: {             /* CALL addr argc: the arguments are already pushed */
+        if (vm->nframes == VM_FRAMES_MAX) {
+            runtime_error(vm, ip, "call stack overflow (recursion deeper than %d)", VM_FRAMES_MAX);
+            return 0;
+        }
+        if (a2 < 0 || a2 > vm->sp) { runtime_error(vm, ip, "bad argument count %d", a2); return 0; }
+        if (a1 < 0 || a1 >= c->count) { runtime_error(vm, ip, "call to invalid address %d", a1); return 0; }
+        CallFrame *f = &vm->frames[vm->nframes++];
+        f->ret_addr = ip + len;         /* come back to the instruction after CALL */
+        f->base = vm->sp - a2;          /* the arguments become locals 0..argc-1  */
+        vm->pc = a1;
+        break;
+    }
+    case OP_ENTER:              /* ENTER n: make room for n more locals, all nil */
+        if (a1 < 0 || vm->sp + a1 > VM_STACK_MAX) { runtime_error(vm, ip, "stack overflow"); return 0; }
+        for (int i = 0; i < a1; i++) PUSH(NIL_VAL);
+        break;
+    case OP_RET: {
+        if (vm->nframes == 0) { runtime_error(vm, ip, "RET outside a function"); return 0; }
+        if (vm->sp < 1) { runtime_error(vm, ip, "stack underflow in RET"); return 0; }
+        Value result = POP();
+        CallFrame *f = &vm->frames[--vm->nframes];
+        vm->sp = f->base;               /* throw away arguments, locals, leftovers */
+        PUSH(result);                   /* the call's value, where the arguments were */
+        vm->pc = f->ret_addr;
+        break;
+    }
+
     case OP_PRINT: {
         Value v = POP();
         value_print(vm->out, v);
@@ -179,7 +219,7 @@ static int execute_one(VM *vm)
         vm->state = VM_HALTED;
         return 0;
 
-    default:                            /* functions (Part 7), heap (Part 8) */
+    default:                            /* heap (Part 8) */
         runtime_error(vm, ip, "%s is not implemented yet", op_info[op].name);
         return 0;
     }
