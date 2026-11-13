@@ -11,7 +11,7 @@ BUILD   = build
 BIN     = bin
 
 # code shared by every program
-CORE_SRCS = src/bytecode.c src/value.c src/vm.c src/frontend.c src/ast.c src/symtab.c src/semantic.c
+CORE_SRCS = src/bytecode.c src/value.c src/vm.c src/frontend.c src/ast.c src/symtab.c src/semantic.c src/codegen.c
 CORE_OBJS = $(CORE_SRCS:src/%.c=$(BUILD)/%.o) $(BUILD)/parser.tab.o $(BUILD)/lex.yy.o
 
 all: $(BIN)/minivm $(BIN)/langc

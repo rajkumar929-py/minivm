@@ -1,0 +1,10 @@
+// straight.lang - straight-line code: no jumps at all
+var a = 7;
+var b;
+print b;
+b = a * 6;
+print b;
+print -(a - 10) % 4;
+print a < b;
+{ var a = 100; print a + b; }
+print a;

@@ -5,35 +5,55 @@
  *   langc --ast    file.lang     print the syntax tree            (Part 4)
  *   langc --sema   file.lang     run the semantic pass, print the
  *                                annotated tree                   (Part 5)
+ *   langc --dis    file.lang     compile, print the bytecode      (Part 6)
+ *   langc --run    file.lang     compile and run on the VM        (Part 6)
+ *   langc --trace  file.lang     run, printing every instruction  (Part 6)
  *
- * Exit status: 0 ok, 1 errors in the program, 2 bad command line or file.
- * More flags arrive later: --dis and --run (Part 6).
+ * Exit status: 0 ok, 1 errors in the program, 2 bad command line or file,
+ *              3 runtime error.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "codegen.h"
 #include "frontend.h"
 #include "semantic.h"
+#include "vm.h"
 
 static int usage(void)
 {
-    fprintf(stderr, "usage: langc (--tokens | --ast | --sema) file.lang\n");
+    fprintf(stderr, "usage: langc (--tokens | --ast | --sema | --dis | --run | --trace) file.lang\n");
     return 2;
+}
+
+/* Run a compiled chunk. Returns 0 if it halted normally, 3 on a runtime error. */
+static int run_chunk(Chunk *chunk, int trace)
+{
+    VM *vm = vm_new(chunk);
+    if (!vm) { fprintf(stderr, "langc: out of memory\n"); return 3; }
+    vm->trace = trace;
+    VMState st = vm_run(vm);
+    if (st == VM_ERROR) fprintf(stderr, "runtime error: %s\n", vm->error);
+    vm_free(vm);
+    return st == VM_ERROR ? 3 : 0;
 }
 
 int main(int argc, char **argv)
 {
-    int tokens = 0, ast = 0, sema = 0;
+    int tokens = 0, ast = 0, sema = 0, dis = 0, run = 0, trace = 0;
     const char *path = NULL;
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--tokens") == 0)    tokens = 1;
-        else if (strcmp(argv[i], "--ast") == 0)  ast = 1;
-        else if (strcmp(argv[i], "--sema") == 0) sema = 1;
-        else if (argv[i][0] == '-')              return usage();
-        else                                     path = argv[i];
+        if (strcmp(argv[i], "--tokens") == 0)     tokens = 1;
+        else if (strcmp(argv[i], "--ast") == 0)   ast = 1;
+        else if (strcmp(argv[i], "--sema") == 0)  sema = 1;
+        else if (strcmp(argv[i], "--dis") == 0)   dis = 1;
+        else if (strcmp(argv[i], "--run") == 0)   run = 1;
+        else if (strcmp(argv[i], "--trace") == 0) run = trace = 1;
+        else if (argv[i][0] == '-')               return usage();
+        else                                      path = argv[i];
     }
-    if (!path || (!tokens && !ast && !sema)) return usage();
+    if (!path || (!tokens && !ast && !sema && !dis && !run)) return usage();
 
     char *src = read_file(path);
     if (!src) {
@@ -62,7 +82,18 @@ int main(int argc, char **argv)
             ast_free(tree);
         }
     }
-    free(src);
+    int rc = (fe_error_count() > 0 || sema_errors > 0) ? 1 : 0;
 
-    return (fe_error_count() > 0 || sema_errors > 0) ? 1 : 0;
+    if (rc == 0 && (dis || run)) {
+        Chunk chunk;
+        if (!compile_source(src, path, &chunk)) {
+            rc = 1;
+        } else {
+            if (dis) disassemble_chunk(&chunk, path, stdout);
+            if (run) rc = run_chunk(&chunk, trace);
+            chunk_free(&chunk);
+        }
+    }
+    free(src);
+    return rc;
 }
