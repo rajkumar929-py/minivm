@@ -26,9 +26,23 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define MAX_LOOPS 128      /* the semantic pass allows at most 100 nested loops */
+
+typedef struct {
+    int *at;               /* operand offsets of jumps still waiting for a target */
+    int count, cap;
+} PatchList;
+
+typedef struct {
+    PatchList breaks;      /* jumps to the loop's exit         */
+    PatchList continues;   /* jumps to the loop's next round   */
+} Loop;
+
 typedef struct {
     Chunk *c;
     const char *filename;
+    Loop loops[MAX_LOOPS]; /* the innermost loop is loops[nloops - 1] */
+    int nloops;
     int errors;
 } CG;
 
@@ -65,6 +79,40 @@ static int emit_jump(CG *g, OpCode op, int line)
 static void patch_here(CG *g, int operand_at)
 {
     chunk_patch_i32(g->c, operand_at, here(g));
+}
+/* ---- loops: break and continue ---- */
+static void patch_push(PatchList *p, int operand_at)
+{
+    if (p->count == p->cap) {
+        p->cap = p->cap ? p->cap * 2 : 4;
+        p->at = realloc(p->at, (size_t)p->cap * sizeof(int));
+        if (!p->at) { perror("realloc"); exit(1); }
+    }
+    p->at[p->count++] = operand_at;
+}
+
+static void patch_all(CG *g, PatchList *p, int target)
+{
+    for (int i = 0; i < p->count; i++) chunk_patch_i32(g->c, p->at[i], target);
+    free(p->at);
+    memset(p, 0, sizeof *p);
+}
+
+static void loop_push(CG *g)
+{
+    if (g->nloops == MAX_LOOPS) {           /* can't happen: the semantic pass stops at 100 */
+        fprintf(stderr, "internal error: loops nested too deeply\n");
+        abort();
+    }
+    memset(&g->loops[g->nloops++], 0, sizeof(Loop));
+}
+
+/* The loop is finished: now both of its targets are known. */
+static void loop_pop(CG *g, int exit_addr, int next_addr)
+{
+    Loop *l = &g->loops[--g->nloops];
+    patch_all(g, &l->breaks, exit_addr);
+    patch_all(g, &l->continues, next_addr);
 }
 
 
@@ -155,9 +203,30 @@ static void gen_while(CG *g, Node *n)
     gen_expr(g, n->a);
     chunk_mark_stmt(g->c, top);
     int jexit = emit_jump(g, OP_JZ, n->line);
+    loop_push(g);
     gen_stmt(g, n->b);
     emit1(g, OP_JMP, top, n->line);     /* backward jump: top is already known */
     patch_here(g, jexit);
+    loop_pop(g, here(g), top);          /* break -> exit, continue -> top */
+}
+
+static void gen_for(CG *g, Node *n)
+{
+    gen_stmt(g, n->a);                  /* init (gen_stmt ignores NULL) */
+    int top = here(g);
+    int jexit = -1;
+    if (n->b) {                         /* no condition = loop forever */
+        gen_expr(g, n->b);
+        chunk_mark_stmt(g->c, top);
+        jexit = emit_jump(g, OP_JZ, n->line);
+    }
+    loop_push(g);
+    gen_stmt(g, n->d);                  /* body */
+    int next = here(g);
+    gen_stmt(g, n->c);                  /* update */
+    emit1(g, OP_JMP, top, n->line);
+    if (jexit >= 0) patch_here(g, jexit);
+    loop_pop(g, here(g), next);         /* break -> exit, continue -> update */
 }
 
 
@@ -193,6 +262,13 @@ static void gen_stmt(CG *g, Node *n)
         return;                         /* the statements inside mark themselves */
     case N_IF:    gen_if(g, n);    return;
     case N_WHILE: gen_while(g, n); return;
+    case N_FOR:   gen_for(g, n);   return;
+    case N_BREAK:
+        patch_push(&g->loops[g->nloops - 1].breaks, emit_jump(g, OP_JMP, n->line));
+        break;
+    case N_CONTINUE:
+        patch_push(&g->loops[g->nloops - 1].continues, emit_jump(g, OP_JMP, n->line));
+        break;
 
     case N_FUNC_DECL:
     case N_RETURN:
