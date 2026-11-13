@@ -2,7 +2,7 @@
  * codegen.c - Walk the annotated AST and emit bytecode into a Chunk.
  *
  * Layout of the generated code:
- *     [ top-level statements ] HALT       (functions go after HALT in Part 7)
+ *     [ top-level statements ] HALT [ func 0 ] [ func 1 ] ...
  *
  * Two rules keep the stack balanced:
  *   - gen_expr leaves EXACTLY ONE new value on the stack
@@ -37,12 +37,20 @@ typedef struct {
     PatchList breaks;      /* jumps to the loop's exit         */
     PatchList continues;   /* jumps to the loop's next round   */
 } Loop;
+typedef struct {
+    int at;                /* offset of the CALL's address operand */
+    int func;              /* which function it calls              */
+} CallSite;
 
 typedef struct {
     Chunk *c;
     const char *filename;
     Loop loops[MAX_LOOPS]; /* the innermost loop is loops[nloops - 1] */
     int nloops;
+    CallSite *calls;       /* every CALL emitted so far */
+    int ncalls, cap_calls;
+    int *func_entry;       /* func_entry[i] = address of function i's first instruction */
+
     int errors;
 } CG;
 
@@ -169,9 +177,21 @@ static void gen_expr(CG *g, Node *n)
         gen_expr(g, n->a);
         emit(g, n->field ? OP_GETR : OP_GETL, n->line);
         break;
-    case N_CALL:
-        cg_error(g, n->line, "function calls are not supported yet (Part 7)");
+    case N_CALL: {
+        for (int i = 0; i < n->list.count; i++) gen_expr(g, n->list.items[i]);
+        int at = emit1(g, OP_CALL, -1, n->line);    /* address: patched at the end */
+        chunk_emit_i32(g->c, n->list.count, n->line);   /* argc */
+        if (g->ncalls == g->cap_calls) {
+            g->cap_calls = g->cap_calls ? g->cap_calls * 2 : 8;
+            g->calls = realloc(g->calls, (size_t)g->cap_calls * sizeof(CallSite));
+            if (!g->calls) { perror("realloc"); exit(1); }
+        }
+        g->calls[g->ncalls].at = at + 1;
+        g->calls[g->ncalls].func = n->func_index;
+        g->ncalls++;
         break;
+    }
+
     default:
         cg_error(g, n->line, "internal: unexpected node in expression");
     }
@@ -270,16 +290,31 @@ static void gen_stmt(CG *g, Node *n)
         patch_push(&g->loops[g->nloops - 1].continues, emit_jump(g, OP_JMP, n->line));
         break;
 
-    case N_FUNC_DECL:
     case N_RETURN:
-        cg_error(g, n->line, "functions are not supported yet (Part 7)");
-        return;
+        if (n->a) gen_expr(g, n->a);
+        else emit(g, OP_PUSH_NIL, n->line);         /* "return;" returns nil */
+        emit(g, OP_RET, n->line);
+        break;
+    case N_FUNC_DECL:
+        return;                         /* bodies are generated after HALT */
+
     default:
         cg_error(g, n->line, "internal: unexpected node in statement");
         return;
     }
     chunk_mark_stmt(g->c, start);       /* first instruction of this statement */
 }
+static void gen_function(CG *g, Node *fn)
+{
+    g->func_entry[fn->func_index] = here(g);
+    /* the caller already pushed the parameters; make room for the other locals */
+    emit1(g, OP_ENTER, fn->nlocals - fn->nparams, fn->line);
+    for (int i = 0; i < fn->a->list.count; i++) gen_stmt(g, fn->a->list.items[i]);
+    /* falling off the end of a function means "return nil" */
+    emit(g, OP_PUSH_NIL, fn->line);
+    emit(g, OP_RET, fn->line);
+}
+
 
 int codegen_program(Node *program, const SemaResult *sema, Chunk *chunk,
                     const char *filename)
@@ -289,11 +324,24 @@ int codegen_program(Node *program, const SemaResult *sema, Chunk *chunk,
     g.c = chunk;
     g.filename = filename ? filename : "<input>";
     chunk->nglobals = sema->nglobals;
+    g.func_entry = calloc((size_t)sema->nfuncs + 1, sizeof(int));
+    if (!g.func_entry) { perror("calloc"); exit(1); }
 
+    /* 1. top-level statements, then HALT */
     for (int i = 0; i < program->list.count; i++) gen_stmt(&g, program->list.items[i]);
-
     int n = program->list.count;
     emit(&g, OP_HALT, n ? program->list.items[n - 1]->line : 1);
+
+    /* 2. function bodies, after HALT */
+    for (int i = 0; i < n; i++)
+        if (program->list.items[i]->kind == N_FUNC_DECL) gen_function(&g, program->list.items[i]);
+
+    /* 3. back-patch every CALL, now that every function's address is known */
+    for (int i = 0; i < g.ncalls; i++)
+        chunk_patch_i32(chunk, g.calls[i].at, g.func_entry[g.calls[i].func]);
+
+    free(g.calls);
+    free(g.func_entry);
     return g.errors == 0;
 }
 

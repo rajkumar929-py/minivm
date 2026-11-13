@@ -1,0 +1,30 @@
+// recursion.lang - functions, locals, recursion, forward and mutual calls
+var calls = 0;
+
+func fact(n) {
+    calls = calls + 1;
+    if (n <= 1) return 1;
+    return n * fact(n - 1);
+}
+
+func fib(n) {
+    if (n < 2) return n;
+    return fib(n - 1) + fib(n - 2);
+}
+
+func sum_to(n) {
+    var total = 0;
+    for (var i = 1; i <= n; i = i + 1) total = total + i;
+    return total;
+}
+
+print fact(5);
+print calls;
+print fib(10);
+print sum_to(100);
+print is_even(7);
+print nothing();
+
+func is_even(n) { if (n == 0) return 1; return is_odd(n - 1); }
+func is_odd(n)  { if (n == 0) return 0; return is_even(n - 1); }
+func nothing() { }
