@@ -7,7 +7,19 @@
  * Two rules keep the stack balanced:
  *   - gen_expr leaves EXACTLY ONE new value on the stack
  *   - gen_stmt leaves the stack exactly as it found it
+ *
+ * Templates (L = label = an address):
+ *   if (c) S1 else S2         while (c) S             for (i; c; u) S
+ *       <c>                   top: <c>                    <i>
+ *       JZ   Lelse                 JZ  Lexit         top: <c>
+ *       <S1>                       <S>                    JZ  Lexit
+ *       JMP  Lend                  JMP top                <S>
+ *   Lelse: <S2>               Lexit:                next: <u>
+ *   Lend:                                                 JMP top
+ *                                                   Lexit:
+ * A jump FORWARD is emitted with target -1 and BACK-PATCHED later.
  */
+
 #include "codegen.h"
 #include "frontend.h"
 #include <stdarg.h>
@@ -42,6 +54,19 @@ static int emit1(CG *g, OpCode op, int32_t operand, int line)
     chunk_emit_i32(g->c, operand, line);
     return at;
 }
+/* A forward jump: the target isn't known yet, so emit -1.
+   Returns the offset of the OPERAND, which is what gets patched later. */
+static int emit_jump(CG *g, OpCode op, int line)
+{
+    return emit1(g, op, -1, line) + 1;
+}
+
+/* Back-patch a forward jump so that it lands HERE. */
+static void patch_here(CG *g, int operand_at)
+{
+    chunk_patch_i32(g->c, operand_at, here(g));
+}
+
 
 /* ---- expressions ---- */
 static void gen_load(CG *g, SymKind k, int slot, int line)
@@ -105,6 +130,37 @@ static void gen_expr(CG *g, Node *n)
 }
 
 /* ---- statements ---- */
+static void gen_stmt(CG *g, Node *n);
+
+static void gen_if(CG *g, Node *n)
+{
+    int start = here(g);
+    gen_expr(g, n->a);
+    chunk_mark_stmt(g->c, start);
+    int jfalse = emit_jump(g, OP_JZ, n->line);      /* to Lelse (or Lend) */
+    gen_stmt(g, n->b);
+    if (n->c) {
+        int jend = emit_jump(g, OP_JMP, n->line);   /* skip over the else */
+        patch_here(g, jfalse);                      /* Lelse is here      */
+        gen_stmt(g, n->c);
+        patch_here(g, jend);                        /* Lend is here       */
+    } else {
+        patch_here(g, jfalse);
+    }
+}
+
+static void gen_while(CG *g, Node *n)
+{
+    int top = here(g);
+    gen_expr(g, n->a);
+    chunk_mark_stmt(g->c, top);
+    int jexit = emit_jump(g, OP_JZ, n->line);
+    gen_stmt(g, n->b);
+    emit1(g, OP_JMP, top, n->line);     /* backward jump: top is already known */
+    patch_here(g, jexit);
+}
+
+
 static void gen_stmt(CG *g, Node *n)
 {
     if (!n) return;
@@ -135,6 +191,9 @@ static void gen_stmt(CG *g, Node *n)
     case N_BLOCK:
         for (int i = 0; i < n->list.count; i++) gen_stmt(g, n->list.items[i]);
         return;                         /* the statements inside mark themselves */
+    case N_IF:    gen_if(g, n);    return;
+    case N_WHILE: gen_while(g, n); return;
+
     case N_FUNC_DECL:
     case N_RETURN:
         cg_error(g, n->line, "functions are not supported yet (Part 7)");

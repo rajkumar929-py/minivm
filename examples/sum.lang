@@ -1,0 +1,8 @@
+// sum.lang - the loop you built by hand in Part 2 (main.c, build_loop)
+var i = 1;
+var sum = 0;
+while (i <= 5) {
+    sum = sum + i;
+    i = i + 1;
+}
+print sum;
